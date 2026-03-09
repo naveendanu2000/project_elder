@@ -1,0 +1,28 @@
+# code-indexer requirements
+# -------------------------
+# Python >= 3.10
+
+# Tree-sitter core library
+tree-sitter>=0.21.0
+
+# Tree-sitter language grammars — install the ones you need:
+tree-sitter-python>=0.21.0
+tree-sitter-javascript>=0.21.0
+tree-sitter-typescript>=0.21.0
+tree-sitter-c>=0.21.0
+tree-sitter-cpp>=0.21.0
+tree-sitter-rust>=0.21.0
+tree-sitter-go>=0.21.0
+tree-sitter-java>=0.21.0
+tree-sitter-ruby>=0.21.0
+
+# Vector store (ChromaDB + default embedding model)
+chromadb>=0.5.0
+
+# LLM backends — install the one(s) you use:
+anthropic>=0.25.0      # for --backend claude
+openai>=1.0.0          # for --backend openai
+ollama>=0.2.0          # for --backend ollama  (also needs Ollama daemon running)
+
+# Optional — for accurate token counting (highly recommended)
+tiktoken>=0.5.0
