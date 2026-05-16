@@ -33,7 +33,7 @@ def _count_tokens(text: str) -> int:
         try:
             import tiktoken  # type: ignore
             _TIKTOKEN_ENC = tiktoken.get_encoding("cl100k_base")
-        except ImportError:
+        except Exception:
             pass
 
     if _TIKTOKEN_ENC is not None:
@@ -85,7 +85,17 @@ def chunk_parsed_file(
     """
     total_tokens = _count_tokens(source_content)
     if total_tokens <= max_tokens:
-        return [_make_chunk(parsed.rel_path, parsed.language, source_content, 1, 1, 0)]
+        end_line = max(1, len(source_content.splitlines()))
+        symbol_names = [sym.name for sym in parsed.symbols]
+        return [_make_chunk(
+            parsed.rel_path,
+            parsed.language,
+            source_content,
+            1,
+            end_line,
+            0,
+            symbol_names,
+        )]
 
     # --- split by symbol boundaries ---
     raw_chunks = list(_split_by_symbols(parsed, source_content, max_tokens))
@@ -121,6 +131,7 @@ def _make_chunk(
     start_line: int,
     end_line: int,
     index: int,
+    symbol_names: list[str] | None = None,
 ) -> Chunk:
     return Chunk(
         chunk_id=f"{rel_path}#chunk{index + 1}",
@@ -130,6 +141,7 @@ def _make_chunk(
         end_line=end_line,
         token_count=_count_tokens(text),
         text=text,
+        symbol_names=symbol_names or [],
         chunk_index=index,
         total_chunks=1,  # will be patched by caller
     )

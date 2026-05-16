@@ -32,6 +32,16 @@ import time
 from pathlib import Path
 
 
+def _configure_console() -> None:
+    """Prefer UTF-8 output on Windows consoles that default to cp1252."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_configure_console()
+
+
 # ---------------------------------------------------------------------------
 # Sub-commands
 # ---------------------------------------------------------------------------

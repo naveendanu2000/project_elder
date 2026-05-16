@@ -44,6 +44,7 @@ python rag.py --db ./my_project.chroma --backend claude --api-key sk-... \\
 from __future__ import annotations
 
 import os
+import sys
 import textwrap
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -51,6 +52,16 @@ from typing import Any
 
 from vectorstore import query_chroma
 from query import SearchResult
+
+
+def _configure_console() -> None:
+    """Prefer UTF-8 output on Windows consoles that default to cp1252."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_configure_console()
 
 
 # ── constants ─────────────────────────────────────────────────────────────────

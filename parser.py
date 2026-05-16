@@ -66,22 +66,23 @@ def _try_load_treesitter() -> bool:
         # tree-sitter >= 0.21 ships grammars as separate pip packages
         # e.g. tree-sitter-python, tree-sitter-javascript …
         _lang_modules = {
-            "python":     "tree_sitter_python",
-            "javascript": "tree_sitter_javascript",
-            "typescript": "tree_sitter_typescript",
-            "c":          "tree_sitter_c",
-            "cpp":        "tree_sitter_cpp",
-            "rust":       "tree_sitter_rust",
-            "go":         "tree_sitter_go",
-            "java":       "tree_sitter_java",
-            "ruby":       "tree_sitter_ruby",
+            "python":     ("tree_sitter_python", "language"),
+            "javascript": ("tree_sitter_javascript", "language"),
+            "typescript": ("tree_sitter_typescript", "language_typescript"),
+            "tsx":        ("tree_sitter_typescript", "language_tsx"),
+            "c":          ("tree_sitter_c", "language"),
+            "cpp":        ("tree_sitter_cpp", "language"),
+            "rust":       ("tree_sitter_rust", "language"),
+            "go":         ("tree_sitter_go", "language"),
+            "java":       ("tree_sitter_java", "language"),
+            "ruby":       ("tree_sitter_ruby", "language"),
         }
 
-        for lang_name, module_name in _lang_modules.items():
+        for lang_name, (module_name, language_func) in _lang_modules.items():
             try:
                 import importlib
                 mod = importlib.import_module(module_name)
-                lang = Language(mod.language())
+                lang = Language(getattr(mod, language_func)())
                 p = Parser(lang)
                 _TS_PARSERS[lang_name] = p
             except Exception:
@@ -108,9 +109,11 @@ def parse_file(src: SourceFile) -> ParsedFile:
         return result
 
     # --- tree-sitter path ---
-    if _TS_AVAILABLE and src.language in _TS_PARSERS:
+    parser_lang = "tsx" if src.path.suffix.lower() == ".tsx" else src.language
+
+    if _TS_AVAILABLE and parser_lang in _TS_PARSERS:
         try:
-            result.symbols = _parse_with_treesitter(src)
+            result.symbols = _parse_with_treesitter(src, parser_lang)
             result.parser_used = "treesitter"
             return result
         except Exception as exc:
@@ -165,6 +168,15 @@ _TS_SYMBOL_QUERIES: dict[str, list[tuple[str, str]]] = {
         ("import_statement", "import"),
         ("type_alias_declaration", "type"),
     ],
+    "tsx": [
+        ("function_declaration", "function"),
+        ("arrow_function", "function"),
+        ("class_declaration", "class"),
+        ("interface_declaration", "interface"),
+        ("method_definition", "method"),
+        ("import_statement", "import"),
+        ("type_alias_declaration", "type"),
+    ],
     "c": [
         ("function_definition", "function"),
         ("struct_specifier", "struct"),
@@ -203,12 +215,12 @@ _TS_SYMBOL_QUERIES: dict[str, list[tuple[str, str]]] = {
 }
 
 
-def _parse_with_treesitter(src: SourceFile) -> list[Symbol]:
-    parser = _TS_PARSERS[src.language]
+def _parse_with_treesitter(src: SourceFile, parser_lang: str) -> list[Symbol]:
+    parser = _TS_PARSERS[parser_lang]
     tree = parser.parse(src.content.encode("utf-8"))
     lines = src.content.splitlines()
 
-    queries = _TS_SYMBOL_QUERIES.get(src.language, [])
+    queries = _TS_SYMBOL_QUERIES.get(parser_lang, _TS_SYMBOL_QUERIES.get(src.language, []))
     symbols: list[Symbol] = []
 
     def _walk(node: Any, parent_name: str = "") -> None:
@@ -245,24 +257,42 @@ def _parse_with_treesitter(src: SourceFile) -> list[Symbol]:
 
 def _ts_node_name(node: Any, source: str) -> str:
     """Extract the identifier name from a tree-sitter node."""
+    source_bytes = source.encode("utf-8")
+
+    def _node_text(n: Any) -> str:
+        return source_bytes[n.start_byte:n.end_byte].decode("utf-8", errors="replace")
+
+    named_child = node.child_by_field_name("name")
+    if named_child is not None:
+        return _node_text(named_child)
+
+    if "import" in node.type:
+        first_line = _node_text(node).splitlines()[0]
+        return first_line.strip()
+
     for child in node.children:
         if child.type == "identifier" or child.type == "name":
-            return source[child.start_byte:child.end_byte]
+            return _node_text(child)
     # last resort: first word on the declaration line
-    text = source[node.start_byte:node.start_byte + 80]
+    text = source_bytes[node.start_byte:node.start_byte + 80].decode("utf-8", errors="replace")
     m = re.search(r"\b([A-Za-z_]\w*)\b", text)
     return m.group(1) if m else ""
 
 
 def _ts_docstring(node: Any, source: str) -> str:
     """Attempt to pull the first string literal child as a docstring."""
+    source_bytes = source.encode("utf-8")
+
+    def _node_text(n: Any) -> str:
+        return source_bytes[n.start_byte:n.end_byte].decode("utf-8", errors="replace")
+
     for child in node.children:
         if child.type in ("block", "statement_block", "body"):
             for grandchild in child.children:
                 if grandchild.type in ("expression_statement",):
                     for ggc in grandchild.children:
                         if ggc.type in ("string", "string_literal"):
-                            raw = source[ggc.start_byte:ggc.end_byte]
+                            raw = _node_text(ggc)
                             return raw.strip("'\"` \n")
     return ""
 

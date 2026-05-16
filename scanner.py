@@ -54,6 +54,7 @@ _DEFAULT_INCLUDE_EXTS: frozenset[str] = frozenset(_SUFFIX_TO_LANG.keys())
 _DEFAULT_EXCLUDES: list[str] = [
     "**/__pycache__/**",
     "**/.git/**",
+    "**/.elder/**",
     "**/node_modules/**",
     "**/.venv/**",
     "**/venv/**",
@@ -61,6 +62,17 @@ _DEFAULT_EXCLUDES: list[str] = [
     "**/build/**",
     "**/*.egg-info/**",
 ]
+
+_EXCLUDED_DIR_NAMES: frozenset[str] = frozenset({
+    "__pycache__",
+    ".git",
+    ".elder",
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +177,8 @@ def _walk(
 
 def _is_excluded(rel_path: Path, patterns: list[str]) -> bool:
     rel_str = str(rel_path).replace("\\", "/")
+    if any(part in _EXCLUDED_DIR_NAMES for part in rel_path.parts):
+        return True
     for pat in patterns:
         # strip leading **/ for simple suffix matching
         if fnmatch.fnmatch(rel_str, pat):
