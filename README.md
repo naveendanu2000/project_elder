@@ -1,8 +1,10 @@
-# code-indexer
+# Elder
 
-A tree-sitter powered code indexer that scans a project directory, extracts
-symbols, chunks large files into ≤ 400-token slices, and saves a searchable
-JSON index — all without needing a vector database.
+A tree-sitter powered code indexer with a full RAG pipeline. Scans a project
+directory, extracts symbols, chunks large files into ≤ 400-token slices, saves
+a searchable vector index in ChromaDB, and lets you query your codebase in
+plain English using Claude, OpenAI, or a local Ollama model — no cloud
+required.
 
 ---
 
@@ -10,12 +12,14 @@ JSON index — all without needing a vector database.
 
 ```
 code_indexer/
-├── scanner.py      — directory walker & file discovery
-├── parser.py       — tree-sitter parsing + symbol extraction
-├── chunker.py      — 400-token chunking with symbol-boundary awareness
-├── index.py        — index assembly, JSON save/load
-├── query.py        — BM25-style keyword search over the index
-├── main.py         — CLI entry point
+├── scanner.py       — directory walker & file discovery
+├── parser.py        — tree-sitter parsing + symbol extraction
+├── chunker.py       — 400-token chunking with symbol-boundary awareness
+├── index.py         — index assembly, JSON save/load
+├── query.py         — BM25-style keyword search over the index
+├── vectorstore.py   — ChromaDB persistence & semantic vector search
+├── rag.py           — RAG pipeline: ChromaDB → LLM → answer
+├── main.py          — CLI entry point (index, search, chroma-save, chroma-search)
 └── requirements.txt
 ```
 
@@ -27,75 +31,199 @@ code_indexer/
 pip install -r requirements.txt
 ```
 
-> **Note** – The indexer works out-of-the-box **without** tree-sitter
-> installed.  It falls back to Python's built-in `ast` module for `.py`
-> files and a regex-based fallback for other languages.  Install
-> `tree-sitter` and the language grammar packages to unlock full
-> multi-language support.
+> **Tree-sitter is optional.** The indexer falls back to Python's built-in
+> `ast` module for `.py` files and a regex-based fallback for all other
+> languages. Install `tree-sitter` and language grammar packages to unlock
+> full multi-language support.
+
+---
+
+## Full pipeline — from code to answers
+
+```
+your code files
+      │
+      │  Step 1 — python main.py chroma-save
+      ▼
+scanner.py    →  finds source files
+parser.py     →  extracts symbols (functions, classes, imports …)
+chunker.py    →  splits into ≤ 400-token chunks
+vectorstore.py → embeds + saves to ChromaDB  (runs once)
+      │
+      │  Step 2 — python rag.py --prompt "..."
+      ▼
+vectorstore.py → semantic search: finds relevant chunks
+rag.py         → builds structured prompt with retrieved code
+      │          sends to Claude / OpenAI / Ollama
+      ▼
+    answer  +  source references
+```
+
+Step 1 is a **one-time setup**. Re-run it only when your codebase changes.
 
 ---
 
 ## Quick start
 
-### 1. Build an index
+### Step 1 — Build the index and save to ChromaDB
 
 ```bash
-python main.py index /path/to/my_project
-# → saves  /path/to/my_project.index.json
+python main.py chroma-save ./my_project --db ./my_project.chroma --verbose
 ```
 
-With options:
+With a prompt pre-filter (only indexes files relevant to your topic):
 
 ```bash
-python main.py index ./my_project \
-    --output ./indexes/myproject.json \
-    --max-tokens 400 \
+python main.py chroma-save ./my_project \
+    --db ./my_project.chroma \
+    --prompt "authentication JWT login" \
     --verbose
 ```
 
-Pre-filter to only index files relevant to a prompt (useful for large repos):
+From an existing JSON index (skip re-scanning):
 
 ```bash
-python main.py index ./my_project --prompt "authentication and JWT"
+python main.py chroma-save --db ./my_project.chroma --from-json ./my_project.index.json
 ```
 
-### 2. Search the index
+### Step 2 — Query with the RAG pipeline
 
 ```bash
-python main.py search ./my_project.index.json "how does user authentication work"
+# Using Claude
+python rag.py --db ./my_project.chroma \
+              --backend claude \
+              --api-key sk-ant-... \
+              --prompt "How does JWT authentication work in this codebase?"
+
+# Using OpenAI
+python rag.py --db ./my_project.chroma \
+              --backend openai \
+              --api-key sk-... \
+              --prompt "Where are database connections created and closed?"
+
+# Using Ollama locally — free, no API key needed
+ollama pull deepseek-r1:14b
+python rag.py --db ./my_project.chroma \
+              --backend ollama \
+              --model deepseek-r1:14b \
+              --prompt "Why does line 42 throw a KeyError?"
 ```
 
-With filters:
+### Interactive mode — keep asking questions
 
 ```bash
-python main.py search ./my_project.index.json "database connection pooling" \
-    --language python \
-    --top-k 5
+python rag.py --db ./my_project.chroma --backend ollama --model deepseek-r1:14b --interactive
+
+You › How does user login work?
+You › Where are tokens validated?
+You › sources        ← shows files retrieved in the last query
+You › exit
+```
+
+---
+
+## LLM backends
+
+| Backend | Command | API Key | Cost |
+|---|---|---|---|
+| `claude` | `--backend claude` | `ANTHROPIC_API_KEY` | Paid |
+| `openai` | `--backend openai` | `OPENAI_API_KEY` | Paid |
+| `ollama` | `--backend ollama` | None | **Free** |
+
+### Recommended Ollama models for code
+
+```bash
+ollama pull deepseek-r1:7b      # ~4.7 GB — works on 8 GB RAM
+ollama pull deepseek-r1:14b     # ~9 GB   — best balance, needs 16 GB RAM
+ollama pull qwen2.5-coder:14b   # ~9 GB   — purpose-built for code
+ollama pull codellama:34b       # ~20 GB  — needs 32 GB RAM
+```
+
+`deepseek-r1` uses step-by-step reasoning before answering, making it
+noticeably better at debugging than plain chat models.
+
+---
+
+## CLI reference
+
+### `main.py` — indexing
+
+```bash
+# Build JSON index
+python main.py index ./my_project --output ./my_project.index.json --verbose
+
+# Build + save directly to ChromaDB
+python main.py chroma-save ./my_project --db ./my_project.chroma
+
+# Push existing JSON index into ChromaDB
+python main.py chroma-save --db ./my_project.chroma --from-json ./my_project.index.json
+
+# BM25 keyword search over a JSON index
+python main.py search ./my_project.index.json "database connection pooling" --top-k 5
+
+# Semantic search directly in ChromaDB
+python main.py chroma-search ./my_project.chroma "JWT token verification" --language python
+```
+
+### `rag.py` — RAG pipeline
+
+```bash
+python rag.py --db <chroma_dir>
+              --backend claude|openai|ollama
+              --api-key <key>          # not needed for ollama
+              --model <model_name>     # e.g. deepseek-r1:14b
+              --prompt "<question>"    # single query
+              --interactive            # REPL mode
+              --top-k 8               # chunks to retrieve (default: 8)
+              --language python        # filter by language
+              --show-prompt            # print the full prompt sent to the LLM
 ```
 
 ---
 
 ## Python API
 
-```python
-from scanner import scan_directory
-from index   import build_index, save_index, load_index
-from query   import search, format_results
+### Build and save to ChromaDB
 
-# --- Build ---
+```python
+from scanner      import scan_directory
+from index        import build_index
+from vectorstore  import save_to_chroma
+
 sources = scan_directory("./my_project")
 idx     = build_index("./my_project", sources, max_tokens_per_chunk=400, verbose=True)
-save_index(idx, "my_project.index.json")
+save_to_chroma(idx, persist_dir="./my_project.chroma", verbose=True)
+```
 
-# --- Search ---
-idx     = load_index("my_project.index.json")
+### RAG query
+
+```python
+from rag import CodeRAG
+
+rag = CodeRAG(
+    db_path = "./my_project.chroma",
+    backend = "ollama",
+    model   = "deepseek-r1:14b",
+    top_k   = 10,
+)
+
+response = rag.query("How does the connection pool handle failures?")
+
+print(response.answer)           # LLM's analysis in Markdown
+print(response.chunks_found)     # number of chunks retrieved
+for src in response.sources:
+    print(src.file, src.lines, src.similarity)
+```
+
+### BM25 keyword search (no LLM)
+
+```python
+from index import load_index
+from query import search, format_results
+
+idx     = load_index("./my_project.index.json")
 results = search(idx, "JWT token validation", top_k=10)
 print(format_results(results))
-
-# --- Use results ---
-for r in results:
-    print(r.chunk.rel_path, r.chunk.start_line, "→", r.chunk.end_line)
-    print(r.chunk.text[:200])
 ```
 
 ---
@@ -123,7 +251,7 @@ for r in results:
           "end_line": 48,
           "signature": "def verify_token(token: str) -> dict:",
           "docstring": "Verify a JWT and return its payload.",
-          "parent": ""               // or enclosing class name
+          "parent": ""
         }
       ],
       "chunks": [
@@ -145,17 +273,18 @@ for r in results:
 
 ---
 
-## How ranking works
+## How search works
 
-The `query.search()` function uses a **BM25-inspired keyword scorer**:
+### Keyword search (`query.py`) — no embeddings needed
+1. **TF×IDF** — term frequency inside chunk × log(N/df) across all chunks.
+2. **Symbol-name exact match** — ×1.5 bonus if a keyword matches a symbol name.
+3. **File-path match** — ×1.3 bonus if a keyword appears in the file path.
 
-1. **TF×IDF** — term frequency inside the chunk × log(N/df) across all chunks.
-2. **Symbol-name exact match** — ×1.5 bonus if any keyword matches a symbol name.
-3. **File-path match** — ×1.3 bonus if any keyword appears in the file path.
-
-For production workloads, drop in any embedding model + vector store — the
-`Chunk` dataclass gives you everything you need (`text`, `symbol_names`, etc.)
-to generate and store embeddings without changing the rest of the pipeline.
+### Semantic search (`vectorstore.py`) — ChromaDB + embeddings
+Chunk text is embedded using `all-MiniLM-L6-v2` (via ChromaDB's default
+embedding function) and stored in an HNSW index. Queries are embedded the same
+way and ranked by cosine similarity. Pass a custom `embedding_function` to use
+OpenAI, Voyage, or any other provider.
 
 ---
 
