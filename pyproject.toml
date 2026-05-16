@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elder-code-indexer"
+version = "0.1.0"
+description = "Prompt-first CLI for indexing and asking questions about codebases."
+requires-python = ">=3.10"
+
+[project.scripts]
+elder = "elder:main"
+
+[tool.setuptools]
+py-modules = [
+  "chunker",
+  "elder",
+  "index",
+  "main",
+  "parser",
+  "query",
+  "rag",
+  "scanner",
+  "vectorstore",
+]

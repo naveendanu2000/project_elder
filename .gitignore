@@ -1,0 +1,11 @@
+.venv/
+.elder/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+*.db
+
+.tmp/
+*.index.json
+*.chroma/
